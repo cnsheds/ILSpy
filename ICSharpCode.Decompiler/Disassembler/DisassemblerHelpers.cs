@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
+// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this
 // software and associated documentation files (the "Software"), to deal in the Software
@@ -581,12 +581,21 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			if (depth++ > MAX_CONVERTTYPE_DEPTH || type == null)
 				return;
 			var ts = type as TypeSpec;
-			if (ts != null) {
+			if (ts != null && !(ts.TypeSig is FnPtrSig)) {
 				WriteTo(((TypeSpec)type).TypeSig, writer, syntax, depth);
 				return;
 			}
 			string typeFullName = type.FullName;
 			string typeName = type.Name.String;
+			if (ts != null) {
+				var fnPtrSig = ts.TypeSig as FnPtrSig;
+				typeFullName = DnlibExtensions.GetFnPtrFullName(fnPtrSig);
+				typeName = DnlibExtensions.GetFnPtrName(fnPtrSig);
+			}
+			// IL 模式下的名字替换
+			typeFullName = IdentifierEscaper.DemangledCPlusPlusName(typeFullName);
+			typeName = IdentifierEscaper.DemangledCPlusPlusName(typeName);
+
 			TypeSig typeSig = null;
 			string name = type.DefinitionAssembly.IsCorLib() ? PrimitiveTypeName(typeFullName, type.Module, out typeSig) : null;
 			if (syntax == ILNameSyntax.ShortTypeName) {
