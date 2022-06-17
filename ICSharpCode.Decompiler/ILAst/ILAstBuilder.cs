@@ -139,14 +139,14 @@ namespace ICSharpCode.Decompiler.ILAst {
 							if (inst == null)
 								continue;
 							sb.Append("IL_" + inst.Offset.ToString("X2"));
-							sb.Append(" ");
+							sb.Append(' ');
 						}
 					} else if (this.Operand is ILLabel) {
 						sb.Append(((ILLabel)this.Operand).Name);
 					} else if (this.Operand is ILLabel[]) {
 						foreach(ILLabel label in (ILLabel[])this.Operand) {
 							sb.Append(label.Name);
-							sb.Append(" ");
+							sb.Append(' ');
 						}
 					} else {
 						sb.Append(this.Operand.ToString());
@@ -157,47 +157,47 @@ namespace ICSharpCode.Decompiler.ILAst {
 					sb.Append(" StackBefore={");
 					bool first = true;
 					foreach (StackSlot slot in this.StackBefore) {
-						if (!first) sb.Append(",");
+						if (!first) sb.Append(',');
 						bool first2 = true;
 						foreach(ByteCode defs in slot.Definitions) {
-							if (!first2) sb.Append("|");
+							if (!first2) sb.Append('|');
 							sb.AppendFormat("IL_{0:X2}", defs.Offset);
 							first2 = false;
 						}
 						first = false;
 					}
-					sb.Append("}");
+					sb.Append('}');
 				}
 
 				if (this.StoreTo != null && this.StoreTo.Count > 0) {
 					sb.Append(" StoreTo={");
 					bool first = true;
 					foreach (ILVariable stackVar in this.StoreTo) {
-						if (!first) sb.Append(",");
+						if (!first) sb.Append(',');
 						sb.Append(stackVar.Name);
 						first = false;
 					}
-					sb.Append("}");
+					sb.Append('}');
 				}
 
 				if (this.VariablesBefore != null) {
 					sb.Append(" VarsBefore={");
 					bool first = true;
 					foreach (VariableSlot varSlot in this.VariablesBefore) {
-						if (!first) sb.Append(",");
+						if (!first) sb.Append(',');
 						if (varSlot.UnknownDefinition) {
-							sb.Append("?");
+							sb.Append('?');
 						} else {
 							bool first2 = true;
 							foreach (ByteCode storedBy in varSlot.Definitions) {
-								if (!first2) sb.Append("|");
+								if (!first2) sb.Append('|');
 								sb.AppendFormat("IL_{0:X2}", storedBy.Offset);
 								first2 = false;
 							}
 						}
 						first = false;
 					}
-					sb.Append("}");
+					sb.Append('}');
 				}
 
 				return sb.ToString();
@@ -281,6 +281,7 @@ namespace ICSharpCode.Decompiler.ILAst {
 			// Create temporary structure for the stack analysis
 			StackAnalysis_body.Clear();
 			List<Instruction> prefixes = null;
+			var methodHasReturnType = methodDef.HasReturnType;
 			var instructions = methodDef.Body.Instructions;
 			int instructionsCount = instructions.Count;
 			var inst = 0 < instructionsCount ? instructions[0] : null;
@@ -301,18 +302,25 @@ namespace ICSharpCode.Decompiler.ILAst {
 					code = codeBkp;
 					operand = inst.Operand;
 				}
+				inst.CalculateStackUsage(methodHasReturnType, out int pushCount, out int popCount);
 				ByteCode byteCode = new ByteCode() {
 					Offset      = inst.Offset,
 					EndOffset   = next?.Offset ?? (uint)methodDef.Body.GetCodeSize(),
 					Code        = code,
 					Operand     = operand,
-					PopCount    = inst.GetPopDelta(methodDef),
-					PushCount   = inst.GetPushDelta(methodDef)
+					PopCount    = popCount,
+					PushCount   = pushCount
 				};
 				if (prefixes != null) {
-					instrToByteCode[prefixes[0]] = byteCode;
-					byteCode.Offset = prefixes[0].Offset;
-					byteCode.Prefixes = prefixes.ToArray();
+					var firstPrefix = prefixes[0];
+					if (inst.SupportsPrefix(firstPrefix.OpCode.Code)) {
+						instrToByteCode[firstPrefix] = byteCode;
+						byteCode.Offset = firstPrefix.Offset;
+						byteCode.Prefixes = prefixes.ToArray();
+					}
+					else {
+						instrToByteCode[inst] = byteCode;
+					}
 					prefixes = null;
 					StackAnalysis_cachedPrefixes.Clear();
 				} else {
@@ -331,11 +339,14 @@ namespace ICSharpCode.Decompiler.ILAst {
 			var exceptionHandlerStarts = new HashSet<ByteCode>(methodDef.Body.ExceptionHandlers.Select(eh => eh.HandlerStart == null ? null : instrToByteCode[eh.HandlerStart]));
 			exceptionHandlerStarts.Remove(null);
 
+			// We do not need a range check as the body will always have at least one bytecode at this point.
+			var firstByteCode = StackAnalysis_body[0];
+
 			// HACK: Some MS reference assemblies contain just a RET instruction. If the method
 			// returns a value, the code below will eventually throw an exception in
 			// StackSlot.ModifyStack().
-			if (StackAnalysis_body.Count == 1 && StackAnalysis_body[0].Code == ILCode.Ret)
-				StackAnalysis_body[0].PopCount = 0;
+			if (StackAnalysis_body.Count == 1 && firstByteCode.Code == ILCode.Ret)
+				firstByteCode.PopCount = 0;
 
 			// Add known states
 			if(methodDef.Body.HasExceptionHandlers) {
@@ -374,9 +385,9 @@ namespace ICSharpCode.Decompiler.ILAst {
 				}
 			}
 
-			StackAnalysis_body[0].StackBefore = Array.Empty<StackSlot>();
-			StackAnalysis_body[0].VariablesBefore = VariableSlot.MakeUknownState(varCount);
-			agenda.Push(StackAnalysis_body[0]);
+			firstByteCode.StackBefore = Array.Empty<StackSlot>();
+			firstByteCode.VariablesBefore = VariableSlot.MakeUknownState(varCount);
+			agenda.Push(firstByteCode);
 
 			// Process agenda
 			while(agenda.Count > 0) {
@@ -405,8 +416,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 						branchTargets.Add(byteCode.Next);
 					}
 				}
-				if (byteCode.Operand is IList<Instruction>) {
-					foreach(Instruction inst2 in (IList<Instruction>)byteCode.Operand) {
+				if (byteCode.Operand is IList<Instruction> instrsOperand) {
+					foreach(Instruction inst2 in instrsOperand) {
 						ByteCode target = instrToByteCode[inst2];
 						branchTargets.Add(target);
 						// The target of a branch must have label
@@ -414,8 +425,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 							target.Label = new ILLabel() { Name = target.Name, Offset = target.Offset };
 						}
 					}
-				} else if (byteCode.Operand is Instruction) {
-					ByteCode target = instrToByteCode[(Instruction)byteCode.Operand];
+				} else if (byteCode.Operand is Instruction instrOperand) {
+					ByteCode target = instrToByteCode[instrOperand];
 					branchTargets.Add(target);
 					// The target of a branch must have label
 					if (target.Label == null) {
@@ -576,14 +587,13 @@ namespace ICSharpCode.Decompiler.ILAst {
 
 			// Convert branch targets to labels
 			foreach (ByteCode byteCode in StackAnalysis_body) {
-				if (byteCode.Operand is IList<Instruction>) {
+				if (byteCode.Operand is IList<Instruction> instrsOp) {
 					StackAnalysis_List_ILLabel.Clear();
-					var oldList = (IList<Instruction>)byteCode.Operand;
-					for (int i = 0; i < oldList.Count; i++)
-						StackAnalysis_List_ILLabel.Add(instrToByteCode[oldList[i]].Label);
+					for (int i = 0; i < instrsOp.Count; i++)
+						StackAnalysis_List_ILLabel.Add(instrToByteCode[instrsOp[i]].Label);
 					byteCode.Operand = StackAnalysis_List_ILLabel.ToArray();
-				} else if (byteCode.Operand is Instruction) {
-					byteCode.Operand = instrToByteCode[(Instruction)byteCode.Operand].Label;
+				} else if (byteCode.Operand is Instruction instrOp) {
+					byteCode.Operand = instrToByteCode[instrOp].Label;
 				}
 			}
 
@@ -740,7 +750,7 @@ namespace ICSharpCode.Decompiler.ILAst {
 							Type = varDef.Type,
 							OriginalVariable = varDef
 					    },
-					    Defs = new List<ByteCode>() { def },
+					    Defs = new List<ByteCode>(1) { def },
 					    Uses  = new List<ByteCode>()
 					}).ToList();
 

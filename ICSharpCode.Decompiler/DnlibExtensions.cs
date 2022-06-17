@@ -99,21 +99,53 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		#region GetPushDelta / GetPopDelta
-		public static int GetPushDelta(this Instruction instruction, MethodDef methodDef)
-		{
-			int pushes, pops;
-			instruction.CalculateStackUsage(methodDef.HasReturnType, out pushes, out pops);
-			return pushes;
+		public static bool SupportsPrefix(this Instruction instr, Code prefix) {
+			switch (instr.OpCode.Code) {
+			case Code.Cpblk:
+			case Code.Initblk:
+			case Code.Ldobj:
+			case Code.Ldind_I:
+			case Code.Ldind_I1:
+			case Code.Ldind_I2:
+			case Code.Ldind_I4:
+			case Code.Ldind_I8:
+			case Code.Ldind_R4:
+			case Code.Ldind_R8:
+			case Code.Ldind_Ref:
+			case Code.Ldind_U1:
+			case Code.Ldind_U2:
+			case Code.Ldind_U4:
+			case Code.Stobj:
+			case Code.Stind_I:
+			case Code.Stind_I1:
+			case Code.Stind_I2:
+			case Code.Stind_I4:
+			case Code.Stind_I8:
+			case Code.Stind_R4:
+			case Code.Stind_R8:
+			case Code.Stind_Ref:
+			case Code.Ldfld:
+			case Code.Stfld:
+				return prefix == Code.Volatile || prefix == Code.Unaligned;
+			case Code.Ldsfld:
+			case Code.Stsfld:
+				return prefix == Code.Volatile;
+			case Code.Callvirt:
+				return prefix == Code.Constrained || prefix == Code.Tailcall;
+			case Code.Call:
+				if (prefix == Code.Readonly) {
+					return instr.Operand is MemberRef memberRef && memberRef.Name == "Address" &&
+						   memberRef.DeclaringType is TypeSpec typeSpec && typeSpec.TypeSig.RemoveModifiers() is ArraySigBase;
+				}
+				return prefix == Code.Tailcall;
+			case Code.Calli:
+				return prefix == Code.Tailcall;
+			case Code.Ldelema:
+				return prefix == Code.Readonly;
+			default:
+				return false;
+			}
 		}
-
-		public static int GetPopDelta(this Instruction instruction, MethodDef methodDef)
-		{
-			int pushes, pops;
-			instruction.CalculateStackUsage(methodDef.HasReturnType, out pushes, out pops);
-			return pops;
-		}
-		#endregion
 
 		/// <summary>
 		/// checks if the given TypeReference is one of the following types:
@@ -256,11 +288,13 @@ namespace ICSharpCode.Decompiler {
 			return false;
 		}
 
+		static readonly UTF8String dynamicCallSiteTypeName = new UTF8String("<>o");
+
 		public static bool IsDynamicCallSiteContainerType(this ITypeDefOrRef type)
 		{
 			if (type == null)
 				return false;
-			return type.Name == "<>o" || type.Name.StartsWith("<>o__");
+			return type.Name == dynamicCallSiteTypeName || type.Name.StartsWith("<>o__");
 		}
 
 		public static bool IsAnonymousType(this ITypeDefOrRef type)
@@ -270,7 +304,7 @@ namespace ICSharpCode.Decompiler {
 			if (!string.IsNullOrEmpty(type.GetNamespaceInternal()))
 				return false;
 			string name = type.Name;
-			if (name.StartsWith("VB$AnonymousType_")|| (type.HasGeneratedName() && (name.Contains("AnonType") || name.Contains("AnonymousType")))) {
+			if (name.StartsWith("VB$AnonymousType_", StringComparison.Ordinal) || (type.HasGeneratedName() && (name.Contains("AnonType") || name.Contains("AnonymousType")))) {
 				TypeDef td = type.ResolveTypeDef();
 				return td != null && td.IsCompilerGenerated();
 			}
@@ -287,7 +321,7 @@ namespace ICSharpCode.Decompiler {
 
 		public static bool IsLocalFunction(this MethodDef method) {
 			var name = method.Name.String;
-			return name.StartsWith("<") && name.Contains(">g__");
+			return name.StartsWith("<", StringComparison.Ordinal) && name.Contains(">g__");
 		}
 
 		public static bool ContainsAnonymousType(this TypeSig type)
@@ -522,11 +556,11 @@ namespace ICSharpCode.Decompiler {
 			PrintArgs(sb, methodSig.Params, true);
 			if (methodSig.ParamsAfterSentinel != null) {
 				if (methodSig.Params.Count > 0)
-					sb.Append(",");
+					sb.Append(',');
 				sb.Append("...,");
 				PrintArgs(sb, methodSig.ParamsAfterSentinel, false);
 			}
-			sb.Append(")");
+			sb.Append(')');
 
 			return sb.ToString();
 		}
@@ -538,15 +572,15 @@ namespace ICSharpCode.Decompiler {
 			var sb = new StringBuilder();
 
 			FullNameFactory.FullNameSB(methodSig.RetType, false, null, null, null, sb);
-			sb.Append("(");
+			sb.Append('(');
 			PrintArgs(sb, methodSig.Params, true);
 			if (methodSig.ParamsAfterSentinel != null) {
 				if (methodSig.Params.Count > 0)
-					sb.Append(",");
+					sb.Append(',');
 				sb.Append("...,");
 				PrintArgs(sb, methodSig.ParamsAfterSentinel, false);
 			}
-			sb.Append(")");
+			sb.Append(')');
 
 			return sb.ToString();
 		}
@@ -554,7 +588,7 @@ namespace ICSharpCode.Decompiler {
 		static void PrintArgs(StringBuilder sb, IList<TypeSig> args, bool isFirst) {
 			foreach (var arg in args) {
 				if (!isFirst)
-					sb.Append(",");
+					sb.Append(',');
 				isFirst = false;
 				FullNameFactory.FullNameSB(arg, false, null, null, null, sb);
 			}
