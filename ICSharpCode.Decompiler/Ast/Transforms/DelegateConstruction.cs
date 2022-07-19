@@ -168,13 +168,31 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 
 		internal static bool IsAnonymousMethod(DecompilerContext context, MethodDef method)
 		{
-			if (method == null || !(method.HasGeneratedName() || method.Name.Contains("$")))
+			if (method is null)
 				return false;
 			if (method.IsLocalFunction())
 				return false;
-			if (!(method.IsCompilerGenerated() || IsPotentialClosure(context, method.DeclaringType)))
+			if (!(method.HasGeneratedName()
+				  || method.Name.Contains("$")
+				  || method.IsCompilerGeneratedOrIsInCompilerGeneratedClass()
+				  || IsPotentialClosure(context, method.DeclaringType)
+				  || ContainsAnonymousType(method)))
+			{
 				return false;
+			}
 			return true;
+		}
+
+		static bool ContainsAnonymousType(MethodDef method)
+		{
+			if (method.ReturnType.ContainsAnonymousType())
+				return true;
+			foreach (var p in method.Parameters)
+			{
+				if (p.Type.ContainsAnonymousType())
+					return true;
+			}
+			return false;
 		}
 
 		bool HandleAnonymousMethod(ObjectCreateExpression objectCreateExpression, Expression target, IMethod methodRef)
@@ -235,20 +253,16 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 			}
 			// Remove the parameter list from an AnonymousMethodExpression if the original method had no names,
 			// and the parameters are not used in the method body
-			if (!isLambda && method.Parameters.SkipNonNormal().All(p => string.IsNullOrEmpty(p.Name) || (p.Name.StartsWith("<") && p.Name.EndsWith(">")))) {
+			if (!isLambda && method.Parameters.SkipNonNormal().All(p => string.IsNullOrEmpty(p.Name) || (p.Name.StartsWith("<", StringComparison.Ordinal) && p.Name.EndsWith(">", StringComparison.Ordinal)))) {
 				var parameterReferencingIdentifiers =
 					from ident in body.Descendants.OfType<IdentifierExpression>()
 					let v = ident.Annotation<ILVariable>()
 					where v != null && v.IsParameter && method.Parameters.Contains(v.OriginalParameter)
 					select ident;
 				if (!parameterReferencingIdentifiers.Any()) {
-					var parentMethod = objectCreateExpression.Parent.Annotation<IMethod>().ResolveMethodDef();
-					var type = parentMethod?.DeclaringType;
-					if (type != null && !HasTwoOrMoreMethods(type, parentMethod.Name)) {
-						ame.AddAnnotation(ame.Parameters.GetAllRecursiveILSpans());
-						ame.Parameters.Clear();
-						ame.HasParameterList = false;
-					}
+					ame.AddAnnotation(ame.Parameters.GetAllRecursiveILSpans());
+					ame.Parameters.Clear();
+					ame.HasParameterList = false;
 				}
 			}
 
