@@ -45,7 +45,7 @@ namespace ICSharpCode.Decompiler {
 			}
 		}
 
-		public static IEnumerable<InterfaceImpl> GetInterfaceImpls(this TypeDef type, bool sortMembers)
+		public static IList<InterfaceImpl> GetInterfaceImpls(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers)
 				return type.Interfaces;
@@ -54,7 +54,7 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		public static IEnumerable<TypeDef> GetNestedTypes(this TypeDef type, bool sortMembers)
+		public static IList<TypeDef> GetNestedTypes(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers)
 				return type.NestedTypes;
@@ -63,7 +63,7 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		public static IEnumerable<FieldDef> GetFields(this TypeDef type, bool sortMembers)
+		public static IList<FieldDef> GetFields(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers || !type.CanSortFields())
 				return type.Fields;
@@ -72,7 +72,7 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		public static IEnumerable<EventDef> GetEvents(this TypeDef type, bool sortMembers)
+		public static IList<EventDef> GetEvents(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers || !type.CanSortMethods())
 				return type.Events;
@@ -81,7 +81,7 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		public static IEnumerable<PropertyDef> GetProperties(this TypeDef type, bool sortMembers)
+		public static IList<PropertyDef> GetProperties(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers || !type.CanSortMethods())
 				return type.Properties;
@@ -90,7 +90,7 @@ namespace ICSharpCode.Decompiler {
 			return ary;
 		}
 
-		public static IEnumerable<MethodDef> GetMethods(this TypeDef type, bool sortMembers)
+		public static IList<MethodDef> GetMethods(this TypeDef type, bool sortMembers)
 		{
 			if (!sortMembers || !type.CanSortMethods())
 				return type.Methods;
@@ -348,29 +348,25 @@ namespace ICSharpCode.Decompiler {
 			return false;
 		}
 
-		public static string GetDefaultMemberName(this TypeDef type, out CustomAttribute defaultMemberAttribute)
+		public static string GetDefaultMemberName(this TypeDef type)
 		{
-			if (type != null)
-				foreach (CustomAttribute ca in type.CustomAttributes.FindAll("System.Reflection.DefaultMemberAttribute"))
+			if (type != null) {
+				foreach (CustomAttribute ca in type.CustomAttributes.FindAll("System.Reflection.DefaultMemberAttribute")) {
 					if (ca.Constructor != null && ca.Constructor.FullName == @"System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)" &&
-						ca.ConstructorArguments.Count == 1 &&
-						ca.ConstructorArguments[0].Value is UTF8String) {
-						defaultMemberAttribute = ca;
-						return (UTF8String)ca.ConstructorArguments[0].Value;
+					    ca.ConstructorArguments.Count == 1) {
+						var value = ca.ConstructorArguments[0].Value;
+						var memberName = (value as UTF8String)?.String ?? value as string;
+						if (memberName is not null) {
+							return memberName;
+						}
 					}
-			defaultMemberAttribute = null;
+				}
+			}
 			return null;
 		}
 
 		public static bool IsIndexer(this PropertyDef property)
 		{
-			CustomAttribute attr;
-			return property.IsIndexer(out attr);
-		}
-
-		static bool IsIndexer(this PropertyDef property, out CustomAttribute defaultMemberAttribute)
-		{
-			defaultMemberAttribute = null;
 			if (property != null && property.PropertySig.GetParamCount() > 0) {
 				var accessor = property.GetMethod ?? property.SetMethod;
 				PropertyDef basePropDef = property;
@@ -378,7 +374,8 @@ namespace ICSharpCode.Decompiler {
 					// if the property is explicitly implementing an interface, look up the property in the interface:
 					MethodDef baseAccessor = accessor.Overrides.First().MethodDeclaration.Resolve();
 					if (baseAccessor != null) {
-						foreach (PropertyDef baseProp in baseAccessor.DeclaringType.Properties) {
+						for (int i = 0; i < baseAccessor.DeclaringType.Properties.Count; i++) {
+							var baseProp = baseAccessor.DeclaringType.Properties[i];
 							if (baseProp.GetMethod == baseAccessor || baseProp.SetMethod == baseAccessor) {
 								basePropDef = baseProp;
 								break;
@@ -387,10 +384,8 @@ namespace ICSharpCode.Decompiler {
 					} else
 						return false;
 				}
-				CustomAttribute attr;
-				var defaultMemberName = basePropDef.DeclaringType.GetDefaultMemberName(out attr);
+				var defaultMemberName = basePropDef.DeclaringType.GetDefaultMemberName();
 				if (defaultMemberName == basePropDef.Name) {
-					defaultMemberAttribute = attr;
 					return true;
 				}
 			}
@@ -416,6 +411,15 @@ namespace ICSharpCode.Decompiler {
 					.ToList();
 			else
 				return methodSig.Params;
+		}
+
+		public static IList<TypeSig> GetParametersWithoutSentinel(this MethodBaseSig methodSig)
+		{
+			if (methodSig is null)
+				return new List<TypeSig>();
+			if (methodSig.ParamsAfterSentinel is not null)
+				return methodSig.Params.Concat(methodSig.ParamsAfterSentinel).ToList();
+			return methodSig.Params;
 		}
 
 		public static ITypeDefOrRef GetTypeDefOrRef(this TypeSig type)
@@ -473,29 +477,25 @@ namespace ICSharpCode.Decompiler {
 		{
 			if (property == null)
 				yield break;
-			if (property.GetMethod != null)
-			{
-				foreach (var param in property.GetMethod.Parameters)
-					yield return param;
+			if (property.GetMethod != null) {
+				for (int i = 0; i < property.GetMethod.Parameters.Count; i++)
+					yield return property.GetMethod.Parameters[i];
 				yield break;
 			}
 			if (property.SetMethod != null)
 			{
 				int last = property.SetMethod.Parameters.Count - 1;
-				foreach (var param in property.SetMethod.Parameters)
-				{
+				for (int i = 0; i < property.SetMethod.Parameters.Count; i++) {
+					var param = property.SetMethod.Parameters[i];
 					if (param.Index != last)
 						yield return param;
 				}
 				yield break;
 			}
 
-			int i = 0;
-			foreach (TypeSig param in property.PropertySig.GetParameters())
-			{
-				yield return new Parameter(i,i,param);
-				i++;
-			}
+			var sigs = property.PropertySig.GetParameters();
+			for (int i = 0; i < sigs.Count; i++)
+				yield return new Parameter(i, i, sigs[i]);
 		}
 
 		public static string GetScopeName(this IScope scope)
@@ -517,13 +517,14 @@ namespace ICSharpCode.Decompiler {
 			return 0;
 		}
 
-		public static IEnumerable<Parameter> SkipNonNormal(this IList<Parameter> parameters)
-		{
+		public static IEnumerable<Parameter> SkipNonNormal(this IList<Parameter> parameters) {
 			if (parameters == null)
 				yield break;
-			foreach (var p in parameters)
+			for (int i = 0; i < parameters.Count; i++) {
+				var p = parameters[i];
 				if (p.IsNormalMethodParameter)
 					yield return p;
+			}
 		}
 
 		public static int GetNumberOfNormalParameters(this IList<Parameter> parameters)
@@ -586,11 +587,11 @@ namespace ICSharpCode.Decompiler {
 		}
 
 		static void PrintArgs(StringBuilder sb, IList<TypeSig> args, bool isFirst) {
-			foreach (var arg in args) {
+			for (int i = 0; i < args.Count; i++) {
 				if (!isFirst)
 					sb.Append(',');
 				isFirst = false;
-				FullNameFactory.FullNameSB(arg, false, null, null, null, sb);
+				FullNameFactory.FullNameSB(args[i], false, null, null, null, sb);
 			}
 		}
 
@@ -664,8 +665,8 @@ namespace ICSharpCode.Decompiler {
 		public static bool HasIsReadOnlyAttribute(IHasCustomAttribute hca) {
 			if (hca == null)
 				return false;
-			foreach (var ca in hca.CustomAttributes) {
-				if (ca.AttributeType.Compare(systemRuntimeCompilerServicesString, isReadOnlyAttributeString))
+			for (int i = 0; i < hca.CustomAttributes.Count; i++) {
+				if (hca.CustomAttributes[i].AttributeType.Compare(systemRuntimeCompilerServicesString, isReadOnlyAttributeString))
 					return true;
 			}
 			return false;
@@ -675,8 +676,8 @@ namespace ICSharpCode.Decompiler {
 		public static bool HasIsByRefLikeAttribute(IHasCustomAttribute hca) {
 			if (hca == null)
 				return false;
-			foreach (var ca in hca.CustomAttributes) {
-				if (ca.AttributeType.Compare(systemRuntimeCompilerServicesString, isByRefLikeAttributeString))
+			for (int i = 0; i < hca.CustomAttributes.Count; i++) {
+				if (hca.CustomAttributes[i].AttributeType.Compare(systemRuntimeCompilerServicesString, isByRefLikeAttributeString))
 					return true;
 			}
 			return false;
@@ -687,23 +688,13 @@ namespace ICSharpCode.Decompiler {
 			if (mod is not ModuleDefMD mdMod)
 				return null;
 			var image = mdMod.Metadata.PEImage;
-			foreach (var section in image.ImageSectionHeaders) {
-				if (rva >= section.VirtualAddress && rva < section.VirtualAddress + Math.Max(section.VirtualSize, section.SizeOfRawData))
+			for (int i = 0; i < image.ImageSectionHeaders.Count; i++) {
+				var section = image.ImageSectionHeaders[i];
+				if (rva >= section.VirtualAddress &&
+				    rva < section.VirtualAddress + Math.Max(section.VirtualSize, section.SizeOfRawData))
 					return section;
 			}
 			return null;
-		}
-
-		public static int IndexOf<T>(this IReadOnlyList<T> collection, T value) {
-			var comparer = EqualityComparer<T>.Default;
-			int index = 0;
-			foreach (var item in collection) {
-				if (comparer.Equals(item, value)) {
-					return index;
-				}
-				index++;
-			}
-			return -1;
 		}
 	}
 }
