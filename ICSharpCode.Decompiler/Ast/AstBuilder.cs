@@ -68,7 +68,7 @@ namespace ICSharpCode.Decompiler.Ast {
 		Event,
 	}
 
-	public class AstBuilder
+	public sealed class AstBuilder
 	{
 		public DecompilerContext Context {
 			get { return context; }
@@ -331,9 +331,9 @@ namespace ICSharpCode.Decompiler.Ast {
 			if (!transformationsHaveRun)
 				RunTransformations();
 
-			syntaxTree.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
+			syntaxTree.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = context.Settings.InsertParenthesesForReadability });
 			GenericGrammarAmbiguityVisitor.ResolveAmbiguities(syntaxTree);
-			var outputFormatter = new TextTokenWriter(output, context) { FoldBraces = false };
+			var outputFormatter = new TextTokenWriter(output, context) ;
 			var formattingPolicy = context.Settings.CSharpFormattingOptions;
 			syntaxTree.AcceptVisitor(new CSharpOutputVisitor(outputFormatter, formattingPolicy, context.CancellationToken));
 		}
@@ -1884,8 +1884,51 @@ namespace ICSharpCode.Decompiler.Ast {
 			}
 			ConvertAttributes(Context.MetadataTextColorProvider, astField, fieldDef, context.Settings, stringBuilder);
 			SetNewModifier(astField);
+
+			if (fieldDef.HasFieldRVA) {
+				var c = GetInitialValueConstant(fieldDef);
+				string commentText = c is not null
+					? $" Note: this field is marked with 'hasfieldrva' and has an initial value of '{c}'."
+					: " Note: this field is marked with 'hasfieldrva'.";
+				astField.InsertChildAfter(null, new Comment(commentText), Roles.Comment);
+			}
+
 			AddComment(astField, fieldDef);
 			return astField;
+		}
+
+		static object GetInitialValueConstant(FieldDef fld) {
+			byte[] initVal = fld.InitialValue;
+			if (initVal is null)
+				return null;
+			switch (fld.FieldType.RemovePinnedAndModifiers().GetElementType()) {
+			case ElementType.Boolean when initVal.Length == 1:
+				return initVal[0] != 0;
+			case ElementType.Char when initVal.Length == 2:
+				return BitConverter.ToChar(initVal, 0);
+			case ElementType.I1 when initVal.Length == 1:
+				return (sbyte)initVal[0];
+			case ElementType.U1 when initVal.Length == 1:
+				return initVal[0];
+			case ElementType.I2 when initVal.Length == 2:
+				return BitConverter.ToInt16(initVal, 0);
+			case ElementType.U2 when initVal.Length == 2:
+				return BitConverter.ToUInt16(initVal, 0);
+			case ElementType.I4 when initVal.Length == 4:
+				return BitConverter.ToInt32(initVal, 0);
+			case ElementType.U4 when initVal.Length == 4:
+				return BitConverter.ToUInt32(initVal, 0);
+			case ElementType.I8 when initVal.Length == 8:
+				return BitConverter.ToInt64(initVal, 0);
+			case ElementType.U8 when initVal.Length == 8:
+				return BitConverter.ToUInt64(initVal, 0);
+			case ElementType.R4 when initVal.Length == 4:
+				return BitConverter.ToSingle(initVal, 0);
+			case ElementType.R8 when initVal.Length == 8:
+				return BitConverter.ToDouble(initVal, 0);
+			default:
+				return null;
+			}
 		}
 
 		static object ConvertConstant(TypeSig type, object constant)
@@ -2195,18 +2238,22 @@ namespace ICSharpCode.Decompiler.Ast {
 						}
 						if (customAttribute.HasNamedArguments) {
 							TypeDef resolvedAttributeType = attributeType.ResolveTypeDef();
-							foreach (var propertyNamedArg in customAttribute.Properties) {
-								var propertyReference = GetProperty(resolvedAttributeType, propertyNamedArg.Name);
-								var propertyName = IdentifierExpression.Create(propertyNamedArg.Name, metadataTextColorProvider.GetColor((object)propertyReference ?? BoxedTextColor.InstanceProperty), true).WithAnnotation(propertyReference);
-								var argumentValue = ConvertArgumentValue(propertyNamedArg.Argument, sb);
-								attribute.Arguments.Add(new AssignmentExpression(propertyName, argumentValue));
-							}
 
-							foreach (var fieldNamedArg in customAttribute.Fields) {
-								var fieldReference = GetField(resolvedAttributeType, fieldNamedArg.Name);
-								var fieldName = IdentifierExpression.Create(fieldNamedArg.Name, metadataTextColorProvider.GetColor((object)fieldReference ?? BoxedTextColor.InstanceField), true).WithAnnotation(fieldReference);
-								var argumentValue = ConvertArgumentValue(fieldNamedArg.Argument, sb);
-								attribute.Arguments.Add(new AssignmentExpression(fieldName, argumentValue));
+							for (var i = 0; i < customAttribute.NamedArguments.Count; i++) {
+								var namedArgument = customAttribute.NamedArguments[i];
+
+								IdentifierExpression memberName;
+								if (namedArgument.IsField) {
+									var fieldReference = GetField(resolvedAttributeType, namedArgument.Name);
+									memberName = IdentifierExpression.Create(namedArgument.Name, metadataTextColorProvider.GetColor((object)fieldReference ?? BoxedTextColor.InstanceField), true).WithAnnotation(fieldReference);
+								}
+								else {
+									var propertyReference = GetProperty(resolvedAttributeType, namedArgument.Name);
+									memberName = IdentifierExpression.Create(namedArgument.Name, metadataTextColorProvider.GetColor((object)propertyReference ?? BoxedTextColor.InstanceProperty), true).WithAnnotation(propertyReference);
+								}
+
+								var argumentValue = ConvertArgumentValue(namedArgument.Argument, sb);
+								attribute.Arguments.Add(new AssignmentExpression(memberName, argumentValue));
 							}
 						}
 					}
