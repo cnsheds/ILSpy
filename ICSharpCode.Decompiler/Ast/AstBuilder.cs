@@ -516,7 +516,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			if (typeDef.IsEnum) {
 				long expectedEnumMemberValue = 0;
 				bool forcePrintingInitializers = IsFlagsEnum(typeDef);
-				var enumType = typeDef.Fields.FirstOrDefault(f => !f.IsStatic);
+				var enumType = typeDef.GetEnumUnderlyingType();
 				for (int i = 0; i < typeDef.Fields.Count; i++) {
 					var field = typeDef.Fields[i];
 					if (!field.IsStatic) {
@@ -535,7 +535,7 @@ namespace ICSharpCode.Decompiler.Ast {
 							continue;
 						long memberValue = (long)CSharpPrimitiveCast.Cast(TypeCode.Int64, constant, false);
 						if (forcePrintingInitializers || memberValue != expectedEnumMemberValue) {
-							enumMember.AddChild(new PrimitiveExpression(ConvertConstant(enumType == null ? null : enumType.FieldSig.GetFieldType(), constant)), EnumMemberDeclaration.InitializerRole);
+							enumMember.AddChild(new PrimitiveExpression(ConvertConstant(enumType, constant)), EnumMemberDeclaration.InitializerRole);
 						}
 						expectedEnumMemberValue = memberValue + 1;
 						astType.AddChild(enumMember, Roles.TypeMemberRole);
@@ -595,15 +595,6 @@ namespace ICSharpCode.Decompiler.Ast {
 		static readonly UTF8String defaultMemberAttributeString = new UTF8String("DefaultMemberAttribute");
 		static readonly UTF8String systemString = new UTF8String("System");
 		static readonly UTF8String multicastDelegateString = new UTF8String("MulticastDelegate");
-
-		static void RemoveFirst<T>(IList<T> collection, int count) {
-			if (collection is List<T> list)
-				list.RemoveRange(0, count);
-			else {
-				for (int i = count - 1; i >= 0; i--)
-					collection.RemoveAt(i);
-			}
-		}
 
 		bool IsNormalDelegate(TypeDef td)
 		{
@@ -698,27 +689,19 @@ namespace ICSharpCode.Decompiler.Ast {
 				return AstType.Null;
 			}
 
-			if (type is ByRefSig) {
+			if (type is ByRefSig byRefSig) {
 				typeIndex++;
-				// by reference type cannot be represented in C#; so we'll represent it as a pointer instead
-				return ConvertType((type as ByRefSig).Next, typeAttributes, ref typeIndex, options, depth, sb)
-					.MakePointerType();
-			} else if (type is PtrSig) {
+				return ConvertType(byRefSig.Next, typeAttributes, ref typeIndex, options, depth, sb).MakeRefType();
+			} else if (type is PtrSig ptrSig) {
 				typeIndex++;
-				return ConvertType((type as PtrSig).Next, typeAttributes, ref typeIndex, options, depth, sb)
-					.MakePointerType();
-			} else if (type is ArraySigBase) {
+				return ConvertType(ptrSig.Next, typeAttributes, ref typeIndex, options, depth, sb).MakePointerType();
+			} else if (type is ArraySigBase arraySig) {
 				typeIndex++;
-				return ConvertType((type as ArraySigBase).Next, typeAttributes, ref typeIndex, options, depth, sb)
-					.MakeArrayType((int)(type as ArraySigBase).Rank);
-			} else if (type is GenericInstSig) {
-				GenericInstSig gType = (GenericInstSig)type;
+				return ConvertType(arraySig.Next, typeAttributes, ref typeIndex, options, depth, sb).MakeArrayType((int)arraySig.Rank);
+			} else if (type is GenericInstSig gType) {
 				if (gType.GenericType != null && gType.GenericArguments.Count == 1 && gType.GenericType.IsSystemNullable()) {
 					typeIndex++;
-					return new ComposedType {
-						BaseType = ConvertType(gType.GenericArguments[0], typeAttributes, ref typeIndex, options, depth, sb),
-						HasNullableSpecifier = true
-					};
+					return ConvertType(gType.GenericArguments[0], typeAttributes, ref typeIndex, options, depth, sb).MakeNullableType();
 				}
 				AstType baseType = ConvertType(gType.GenericType?.TypeDefOrRef, typeAttributes, ref typeIndex, options & ~ConvertTypeOptions.IncludeTypeParameterDefinitions, depth, sb);
 				List<AstType> typeArguments = new List<AstType>(gType.GenericArguments.Count);
@@ -728,13 +711,12 @@ namespace ICSharpCode.Decompiler.Ast {
 				}
 				ApplyTypeArgumentsTo(baseType, typeArguments);
 				return baseType;
-			} else if (type is GenericSig) {
-				var sig = (GenericSig)type;
-				var simpleType = new SimpleType(sig.GetName(sb)).WithAnnotation(sig.GenericParam).WithAnnotation(type);
-				simpleType.IdentifierToken.WithAnnotation(sig.GenericParam).WithAnnotation(type);
+			} else if (type is GenericSig sig) {
+				var simpleType = new SimpleType(sig.GetName(sb)).WithAnnotation(sig.GenericParam).WithAnnotation(sig);
+				simpleType.IdentifierToken.WithAnnotation(sig.GenericParam).WithAnnotation(sig);
 				return simpleType;
-			} else if (type is TypeDefOrRefSig) {
-				return ConvertType(((TypeDefOrRefSig)type).TypeDefOrRef, typeAttributes, ref typeIndex, options, depth, sb);
+			} else if (type is TypeDefOrRefSig typeDefOrRefSig) {
+				return ConvertType(typeDefOrRefSig.TypeDefOrRef, typeAttributes, ref typeIndex, options, depth, sb);
 			} else if (type is ModifierSig modifierSig) {
 				typeIndex++;
 				return ConvertType(modifierSig.Next, typeAttributes, ref typeIndex, options, depth, sb);
@@ -1226,7 +1208,6 @@ namespace ICSharpCode.Decompiler.Ast {
 			EntityDeclaration returnValue = astMethod;
 			astMethod.AddAnnotation(methodDef);
 			astMethod.ReturnType = ConvertType(methodDef.ReturnType, stringBuilder, methodDef.Parameters.ReturnParameter.ParamDef);
-			bool isRefReturnType = methodDef.ReturnType.RemovePinnedAndModifiers().GetElementType() == ElementType.ByRef && UndoByRefToPointer(astMethod.ReturnType);
 			string name = methodDef.Name;
 			if (IsExplicitInterfaceImplementation(methodDef)) {
 				var lastDot = name.LastIndexOf('.');
@@ -1293,8 +1274,6 @@ namespace ICSharpCode.Decompiler.Ast {
 				AddComment(op, methodDef);
 				return op;
 			}
-			if (isRefReturnType)
-				astMethod.Modifiers |= Modifiers.Ref;
 			if (DnlibExtensions.HasIsReadOnlyAttribute(methodDef.Parameters.ReturnParameter.ParamDef))
 				astMethod.Modifiers |= Modifiers.Readonly;
 			AddComment(returnValue, methodDef);
@@ -1426,7 +1405,6 @@ namespace ICSharpCode.Decompiler.Ast {
 			}
 			astProp.NameToken = Identifier.Create(name).WithAnnotation(propDef);
 			astProp.ReturnType = ConvertType(propDef.PropertySig.GetRetType(), stringBuilder, propDef);
-			bool isRefReturnType = propDef.PropertySig.GetRetType().RemovePinnedAndModifiers().GetElementType() == ElementType.ByRef && UndoByRefToPointer(astProp.ReturnType);
 
 			if (propDef.GetMethod != null) {
 				astProp.Getter = new Accessor();
@@ -1472,8 +1450,6 @@ namespace ICSharpCode.Decompiler.Ast {
 			if(accessor != null && !accessor.HasOverrides && accessor.DeclaringType != null && !accessor.DeclaringType.IsInterface)
 				if (accessor.IsVirtual == accessor.IsNewSlot)
 					SetNewModifier(member);
-			if (isRefReturnType)
-				astProp.Modifiers |= Modifiers.Ref;
 			if (accessor is not null && DnlibExtensions.HasIsReadOnlyAttribute(accessor.Parameters.ReturnParameter.ParamDef))
 				astProp.Modifiers |= Modifiers.Readonly;
 			if (propDef.SetMethod != null)
@@ -1678,7 +1654,7 @@ namespace ICSharpCode.Decompiler.Ast {
 							continue;
 						var parameter = p.Annotation<Parameter>();
 						var astType = ConvertType(parameter.Type, stringBuilder, parameter.ParamDef);
-						UndoByRefToPointer(astType);
+						UndoRefSpecifier(astType);
 						var defVal = new DefaultValueExpression(astType);
 						var stmt = new ExpressionStatement(new AssignmentExpression(new IdentifierExpression(p.Name), defVal));
 						bs.Statements.Add(stmt);
@@ -2001,13 +1977,9 @@ namespace ICSharpCode.Decompiler.Ast {
 			}
 		}
 
-		internal static bool UndoByRefToPointer(AstType type) {
-			var ct = type as ComposedType;
-			if (ct != null && ct.PointerRank > 0) {
-				ct.PointerRank--;
-				return true;
-			}
-			return false;
+		internal static void UndoRefSpecifier(AstType type) {
+			if (type is ComposedType ct && ct.HasRefSpecifier)
+				ct.HasRefSpecifier = false;
 		}
 
 		static IEnumerable<ParameterDeclaration> MakeParameters(MetadataTextColorProvider metadataTextColorProvider, IList<Parameter> paramCol, DecompilerSettings settings, StringBuilder sb, bool isLambda = false) {
@@ -2033,7 +2005,7 @@ namespace ICSharpCode.Decompiler.Ast {
 						astParam.ParameterModifier = ParameterModifier.In;
 					else
 						astParam.ParameterModifier = ParameterModifier.Ref;
-					UndoByRefToPointer(astParam.Type);
+					UndoRefSpecifier(astParam.Type);
 				}
 
 				if (paramDef.HasParamDef) {
