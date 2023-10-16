@@ -416,7 +416,7 @@ namespace ICSharpCode.Decompiler.Ast {
 							return CleanUpVariableName(methodRef.Name.Substring(3));
 						}
 					}
-					MethodDef methodDef = methodRef.Resolve();
+					MethodDef methodDef = methodRef.ResolveMethodDef();
 					if (methodDef != null) {
 						var p = methodDef.Parameters.ElementAtOrDefault(i + (parent.Code == ILCode.Newobj ? 1 : 0));
 						if (p != null && !string.IsNullOrEmpty(p.Name))
@@ -429,14 +429,12 @@ namespace ICSharpCode.Decompiler.Ast {
 			return null;
 		}
 
-		static readonly UTF8String systemString = new UTF8String("System");
-		static readonly UTF8String nullableString = new UTF8String("Nullable`1");
 		string GetNameByType(TypeSig type)
 		{
-			type = type.RemoveModifiers();
+			type = type.RemovePinnedAndModifiers();
 
 			GenericInstSig git = type as GenericInstSig;
-			if (git != null && git.GenericType != null && git.GenericArguments.Count == 1 && git.GenericType.TypeDefOrRef.Compare(systemString, nullableString)) {
+			if (git != null && git.GenericType != null && git.GenericArguments.Count == 1 && git.GenericType.IsSystemNullable()) {
 				type = ((GenericInstSig)type).GenericArguments[0];
 			}
 

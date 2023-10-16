@@ -142,6 +142,8 @@ namespace ICSharpCode.Decompiler {
 				return prefix == Code.Tailcall;
 			case Code.Ldelema:
 				return prefix == Code.Readonly;
+			case Code.Ldftn:
+				return prefix == Code.Constrained;
 			default:
 				return false;
 			}
@@ -212,61 +214,51 @@ namespace ICSharpCode.Decompiler {
 			return string.Format("IL_{0:X4}", offset);
 		}
 
-		public static TypeDef ResolveWithinSameModule(this ITypeDefOrRef type)
-		{
-			if (type != null && type.Scope == type.Module)
+		public static TypeDef ResolveWithinSameModule(this ITypeDefOrRef type) {
+			if (type is null)
+				return null;
+			if (type is TypeDef typeDef)
+				return typeDef;
+
+			var scope = type.Scope;
+			if (scope is null || scope == type.Module)
 				return type.ResolveTypeDef();
-			else
-				return null;
+			return null;
 		}
 
-		public static FieldDef ResolveFieldWithinSameModule(this MemberRef field)
-		{
-			if (field != null && field.DeclaringType != null && field.DeclaringType.Scope == field.Module)
-				return field.ResolveField();
-			else
-				return null;
+		public static FieldDef ResolveFieldWithinSameModule(this IField field) {
+			if (field is FieldDef fieldDef)
+				return fieldDef;
+
+			if (field is MemberRef memberRef && memberRef.IsFieldRef) {
+				var declType = memberRef.DeclaringType;
+				if (declType is null)
+					return null;
+				var scope = declType.Scope;
+				if (scope is null || scope == memberRef.Module)
+					return memberRef.ResolveField();
+			}
+
+			return null;
 		}
 
-		public static FieldDef ResolveFieldWithinSameModule(this IField field)
-		{
-			if (field != null && field.DeclaringType != null && field.DeclaringType.Scope == field.Module)
-				return field is FieldDef ? (FieldDef)field : ((MemberRef)field).ResolveField();
-			else
-				return null;
-		}
+		public static MethodDef ResolveMethodWithinSameModule(this IMethod method) {
+			if (method is MethodSpec spec)
+				method = spec.Method;
 
-		public static MethodDef ResolveMethodWithinSameModule(this IMethod method)
-		{
-			if (method is MethodSpec)
-				method = ((MethodSpec)method).Method;
-			if (method != null && method.DeclaringType != null && method.DeclaringType.Scope == method.Module)
-				return method is MethodDef ? (MethodDef)method : ((MemberRef)method).ResolveMethod();
-			else
-				return null;
-		}
+			if (method is MethodDef mDef)
+				return mDef;
 
-		public static MethodDef Resolve(this IMethod method)
-		{
-			if (method is MethodSpec)
-				method = ((MethodSpec)method).Method;
-			if (method is MemberRef)
-				return ((MemberRef)method).ResolveMethod();
-			else
-				return (MethodDef)method;
-		}
+			if (method is MemberRef memberRef && memberRef.IsMethodRef) {
+				var declType = memberRef.DeclaringType;
+				if (declType is null)
+					return null;
+				var scope = declType.Scope;
+				if (scope is null || scope == memberRef.Module)
+					return memberRef.ResolveMethod();
+			}
 
-		public static FieldDef Resolve(this IField field)
-		{
-			if (field is MemberRef)
-				return ((MemberRef)field).ResolveField();
-			else
-				return (FieldDef)field;
-		}
-
-		public static TypeDef Resolve(this IType type)
-		{
-			return type == null ? null : type.GetScopeTypeDefOrRef().ResolveTypeDef();
+			return null;
 		}
 
 		public static bool IsCompilerGenerated(this IHasCustomAttribute provider)
@@ -348,50 +340,6 @@ namespace ICSharpCode.Decompiler {
 			return false;
 		}
 
-		public static string GetDefaultMemberName(this TypeDef type)
-		{
-			if (type != null) {
-				foreach (CustomAttribute ca in type.CustomAttributes.FindAll("System.Reflection.DefaultMemberAttribute")) {
-					if (ca.Constructor != null && ca.Constructor.FullName == @"System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)" &&
-					    ca.ConstructorArguments.Count == 1) {
-						var value = ca.ConstructorArguments[0].Value;
-						var memberName = (value as UTF8String)?.String ?? value as string;
-						if (memberName is not null) {
-							return memberName;
-						}
-					}
-				}
-			}
-			return null;
-		}
-
-		public static bool IsIndexer(this PropertyDef property)
-		{
-			if (property != null && property.PropertySig.GetParamCount() > 0) {
-				var accessor = property.GetMethod ?? property.SetMethod;
-				PropertyDef basePropDef = property;
-				if (accessor != null && accessor.HasOverrides) {
-					// if the property is explicitly implementing an interface, look up the property in the interface:
-					MethodDef baseAccessor = accessor.Overrides.First().MethodDeclaration.Resolve();
-					if (baseAccessor != null) {
-						for (int i = 0; i < baseAccessor.DeclaringType.Properties.Count; i++) {
-							var baseProp = baseAccessor.DeclaringType.Properties[i];
-							if (baseProp.GetMethod == baseAccessor || baseProp.SetMethod == baseAccessor) {
-								basePropDef = baseProp;
-								break;
-							}
-						}
-					} else
-						return false;
-				}
-				var defaultMemberName = basePropDef.DeclaringType.GetDefaultMemberName();
-				if (defaultMemberName == basePropDef.Name) {
-					return true;
-				}
-			}
-			return false;
-		}
-
 		public static Instruction GetPrevious(this CilBody body, Instruction instr)
 		{
 			int index = body.Instructions.IndexOf(instr);
@@ -422,19 +370,6 @@ namespace ICSharpCode.Decompiler {
 			return methodSig.Params;
 		}
 
-		public static ITypeDefOrRef GetTypeDefOrRef(this TypeSig type)
-		{
-			type = type.RemovePinnedAndModifiers();
-			if (type == null)
-				return null;
-			if (type.IsGenericInstanceType)
-				return ((GenericInstSig)type).GenericType?.TypeDefOrRef;
-			else if (type.IsTypeDefOrRef)
-				return ((TypeDefOrRefSig)type).TypeDefOrRef;
-			else
-				return null;
-		}
-
 		public static bool IsSystemBoolean(this ITypeDefOrRef type)
 		{
 			if (type == null)
@@ -442,14 +377,7 @@ namespace ICSharpCode.Decompiler {
 			if (!type.DefinitionAssembly.IsCorLib())
 				return false;
 
-			var tr = type as TypeRef;
-			if (tr != null)
-				return tr.Namespace == systemString && tr.Name == booleanString;
-			var td = type as TypeDef;
-			if (td != null)
-				return td.Namespace == systemString && td.Name == booleanString;
-
-			return false;
+			return type.Compare(systemString, booleanString);
 		}
 		static readonly UTF8String systemString = new UTF8String("System");
 		static readonly UTF8String booleanString = new UTF8String("Boolean");
@@ -463,14 +391,7 @@ namespace ICSharpCode.Decompiler {
 			if (!type.DefinitionAssembly.IsCorLib())
 				return false;
 
-			var tr = type as TypeRef;
-			if (tr != null)
-				return tr.Namespace == systemString && tr.Name == objectString;
-			var td = type as TypeDef;
-			if (td != null)
-				return td.Namespace == systemString && td.Name == objectString;
-
-			return false;
+			return type.Compare(systemString, objectString);
 		}
 
 		public static IEnumerable<Parameter> GetParameters(this PropertyDef property)
@@ -613,34 +534,28 @@ namespace ICSharpCode.Decompiler {
 		public static bool IsValueType(TypeSig ts) => ts?.IsValueType ?? false;
 
 		static string GetNamespaceInternal(this ITypeDefOrRef tdr) {
-			var tr = tdr as TypeRef;
-			if (tr != null)
+			if (tdr is TypeRef tr)
 				return tr.Namespace;
-			var td = tdr as TypeDef;
-			if (td != null)
+			if (tdr is TypeDef td)
 				return td.Namespace;
 			return tdr.Namespace;
 		}
 
 		public static string GetNamespace(this IType type, StringBuilder sb) {
-			var td = type as TypeDef;
-			if (td != null)
+			if (type is TypeDef td)
 				return td.Namespace;
-			var tr = type as TypeRef;
-			if (tr != null)
+			if (type is TypeRef tr)
 				return tr.Namespace;
-			sb.Length = 0;
+			sb.Clear();
 			return FullNameFactory.Namespace(type, false, sb);
 		}
 
 		public static string GetName(this IType type, StringBuilder sb) {
-			var td = type as TypeDef;
-			if (td != null)
+			if (type is TypeDef td)
 				return td.Name;
-			var tr = type as TypeRef;
-			if (tr != null)
+			if (type is TypeRef tr)
 				return tr.Name;
-			sb.Length = 0;
+			sb.Clear();
 			return FullNameFactory.Name(type, false, sb);
 		}
 
@@ -663,24 +578,12 @@ namespace ICSharpCode.Decompiler {
 		}
 
 		public static bool HasIsReadOnlyAttribute(IHasCustomAttribute hca) {
-			if (hca == null)
-				return false;
-			for (int i = 0; i < hca.CustomAttributes.Count; i++) {
-				if (hca.CustomAttributes[i].AttributeType.Compare(systemRuntimeCompilerServicesString, isReadOnlyAttributeString))
-					return true;
-			}
-			return false;
+			return hca.IsDefined(systemRuntimeCompilerServicesString, isReadOnlyAttributeString);
 		}
 		static readonly UTF8String isReadOnlyAttributeString = new UTF8String("IsReadOnlyAttribute");
 
 		public static bool HasIsByRefLikeAttribute(IHasCustomAttribute hca) {
-			if (hca == null)
-				return false;
-			for (int i = 0; i < hca.CustomAttributes.Count; i++) {
-				if (hca.CustomAttributes[i].AttributeType.Compare(systemRuntimeCompilerServicesString, isByRefLikeAttributeString))
-					return true;
-			}
-			return false;
+			return hca.IsDefined(systemRuntimeCompilerServicesString, isByRefLikeAttributeString);
 		}
 		static readonly UTF8String isByRefLikeAttributeString = new UTF8String("IsByRefLikeAttribute");
 
@@ -713,5 +616,23 @@ namespace ICSharpCode.Decompiler {
 			list.Capacity = newCapacity;
 		}
 		#endif
+
+		public static string FullName(this IMethod method, StringBuilder sb) {
+			var methodDef = method as MethodDef;
+			var methodSpec = method as MethodSpec;
+			if (methodSpec is not null)
+				method = methodSpec.Method;
+			var memberRef = method as MemberRef;
+
+			string declaringType;
+			if (memberRef is not null && memberRef.Class is ModuleRef modRef)
+				declaringType = $"[module:{modRef}]<Module>";
+			else
+				declaringType = FullNameFactory.FullName(method.DeclaringType, false, null, sb.Clear());
+
+			var typeGenArgs = ((memberRef?.Class as TypeSpec)?.TypeSig as GenericInstSig)?.GenericArguments;
+			var methodGenArgs = methodSpec?.GenericInstMethodSig?.GenericArguments;
+			return FullNameFactory.MethodFullName(declaringType, method.Name, method.MethodSig, typeGenArgs, methodGenArgs, methodDef, sb.Clear());
+		}
 	}
 }

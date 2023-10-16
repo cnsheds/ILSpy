@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using dnlib.DotNet;
+using dnSpy.Contracts.Decompiler;
 
 namespace ICSharpCode.Decompiler.ILAst
 {
@@ -54,6 +55,7 @@ namespace ICSharpCode.Decompiler.ILAst
 					}
 					body[pos] = newStloc;
 					body.RemoveAt(initArrayPos);
+					return true;
 				}
 				// Put in a limit so that we don't consume too much memory if the code allocates a huge array
 				// and populates it extremely sparsly. However, 255 "null" elements in a row actually occur in the Mono C# compiler!
@@ -148,7 +150,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			if (body.ElementAtOrDefault(pos).Match(ILCode.Call, out methodRef, out methodArg1, out methodArg2) &&
 				methodRef.Name == nameInitializeArray &&
 				methodRef.DeclaringType != null &&
-			    methodRef.DeclaringType.FullName == "System.Runtime.CompilerServices.RuntimeHelpers" &&
+				FullNameFactory.FullName(methodRef.DeclaringType, false, null, sb.Clear()) == "System.Runtime.CompilerServices.RuntimeHelpers" &&
 			    methodArg1.Match(ILCode.Ldloc, out v2) &&
 			    array == v2 &&
 			    methodArg2.Match(ILCode.Ldtoken, out fieldRef))

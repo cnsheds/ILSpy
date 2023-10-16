@@ -995,7 +995,7 @@ namespace ICSharpCode.Decompiler.Ast {
 								return ace;
 							}
 						}
-						MethodDef ctor = ((IMethod)operand).Resolve();
+						MethodDef ctor = ((IMethod)operand).ResolveMethodDef();
 						if (declaringType.IsAnonymousType() && ctor != null) {
 							AnonymousTypeCreateExpression atce = new AnonymousTypeCreateExpression();
 							if (CanInferAnonymousTypePropertyNamesFromArguments(args, ctor.Parameters)) {
@@ -1207,7 +1207,7 @@ namespace ICSharpCode.Decompiler.Ast {
 		AstNode TransformCall(bool isVirtual, ILExpression byteCode, List<Ast.Expression> args, MethodSemanticsAttributes? forceSemAttr = null)
 		{
 			IMethod method = (IMethod)byteCode.Operand;
-			MethodDef methodDef = method.Resolve();
+			MethodDef methodDef = method.ResolveMethodDef();
 			Ast.Expression target;
 			List<Ast.Expression> methodArgs = new List<Ast.Expression>(args);
 			if (method.MethodSig != null && method.MethodSig.HasThis) {
@@ -1411,7 +1411,7 @@ namespace ICSharpCode.Decompiler.Ast {
 
 		static void AdjustArgumentsForMethodCall(IMethod method, List<Expression> methodArgs)
 		{
-			MethodDef methodDef = method.Resolve();
+			MethodDef methodDef = method.ResolveMethodDef();
 			if (methodDef == null)
 				return;
 			int skip = methodDef.Parameters.GetParametersSkip();
@@ -1492,7 +1492,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			#endif
 		}
 
-		static Expression InlineAssembly(ILExpression byteCode, List<Ast.Expression> args)
+		Expression InlineAssembly(ILExpression byteCode, List<Ast.Expression> args)
 		{
 			#if DEBUG
 			unhandledOpcodes.AddOrUpdate(byteCode.Code, c => 1, (c, n) => n+1);
@@ -1506,28 +1506,27 @@ namespace ICSharpCode.Decompiler.Ast {
 			return IdentifierExpression.Create(byteCode.Code.GetName(), BoxedTextColor.OpCode).Invoke(args);
 		}
 
-		static string FormatByteCodeOperand(object operand)
+		string FormatByteCodeOperand(object operand)
 		{
 			if (operand == null) {
 				return string.Empty;
 				//} else if (operand is ILExpression) {
 				//	return string.Format("IL_{0:X2}", ((ILExpression)operand).Offset);
-			} else if (operand is IMethod && ((IMethod)operand).MethodSig != null) {
-				return IdentifierEscaper.Escape(((IMethod)operand).Name) + "()";
-			} else if (operand is ITypeDefOrRef) {
-				return IdentifierEscaper.Escape(((ITypeDefOrRef)operand).FullName);
-			} else if (operand is Local) {
-				return IdentifierEscaper.Escape(((Local)operand).Name);
-			} else if (operand is Parameter) {
-				return IdentifierEscaper.Escape(((Parameter)operand).Name);
-			} else if (operand is IField) {
-				return IdentifierEscaper.Escape(((IField)operand).Name);
-			} else if (operand is string) {
-				return "\"" + Escape((string)operand) + "\"";
+			} else if (operand is IMethod method && method.MethodSig != null) {
+				return IdentifierEscaper.Escape(method.Name) + "()";
+			} else if (operand is ITypeDefOrRef typeDefOrRef) {
+				return IdentifierEscaper.Escape(FullNameFactory.FullName(typeDefOrRef, false, null, stringBuilder.Clear()));
+			} else if (operand is Local local) {
+				return IdentifierEscaper.Escape(local.Name);
+			} else if (operand is Parameter parameter) {
+				return IdentifierEscaper.Escape(parameter.Name);
+			} else if (operand is IField field) {
+				return IdentifierEscaper.Escape(field.Name);
+			} else if (operand is string str) {
+				return "\"" + Escape(str) + "\"";
 			} else if (operand is int) {
 				return operand.ToString();
-			} else if (operand is MethodSig) {
-				var msig = (MethodSig)operand;
+			} else if (operand is MethodSig msig) {
 				return Escape(DnlibExtensions.GetMethodSigFullName(msig));
 			} else {
 				return Escape(operand.ToString());
