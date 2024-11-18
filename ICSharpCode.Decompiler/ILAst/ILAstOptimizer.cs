@@ -23,6 +23,7 @@ using ICSharpCode.NRefactory.Utils;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using dnSpy.Contracts.Decompiler;
 
@@ -1629,6 +1630,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// </summary>
 		void IntroducePropertyAccessInstructions(ILNode node)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			ILExpression parentExpr = node as ILExpression;
 			if (parentExpr != null) {
 				for (int i = 0; i < parentExpr.Arguments.Count; i++) {
@@ -1838,6 +1841,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// </summary>
 		void FlattenBasicBlocks(ILNode node)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			ILBlock block = node as ILBlock;
 			if (block != null) {
 				ILBasicBlock prevChildAsBB = null;
@@ -2163,6 +2168,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 
 		public static void ReplaceVariables(ILNode node, Func<ILVariable, ILVariable> variableMapping)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			ILExpression expr = node as ILExpression;
 			if (expr != null) {
 				ILVariable v = expr.Operand as ILVariable;
