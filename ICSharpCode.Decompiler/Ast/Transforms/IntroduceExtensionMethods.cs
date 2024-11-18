@@ -63,6 +63,9 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 									mre.Target.AddAnnotation(ilSpans);
 							}
 							if (invocation.Arguments.Any()) {
+								if (!d.GetParams().Any(x => x is GenericMVar))
+									continue;
+
 								// HACK: removing type arguments should be done indepently from whether a method is an extension method,
 								// just by testing whether the arguments can be inferred
 								var ilSpans = mre.TypeArguments.GetAllRecursiveILSpans();
