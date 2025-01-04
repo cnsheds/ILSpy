@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
@@ -869,6 +870,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 
 		List<ILNode> ConvertToAst(List<ByteCode> body, HashSet<ExceptionHandler> ehs)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			List<ILNode> ast = new List<ILNode>();
 
 			while (ehs.Count != 0) {

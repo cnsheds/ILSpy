@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using dnlib.DotNet;
 
 namespace ICSharpCode.Decompiler.ILAst {
@@ -73,6 +74,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// </summary>
 		void AnalyzeNode(ILNode node, int direction = 1)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			ILExpression expr = node as ILExpression;
 			if (expr != null) {
 				ILVariable locVar = expr.Operand as ILVariable;
@@ -419,6 +422,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// <returns>true = found; false = cannot continue search; null = not found</returns>
 		bool? FindLoadInNext(ILExpression expr, ILVariable v, ILExpression expressionBeingMoved, out ILExpression parent, out int pos)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			parent = null;
 			pos = 0;
 			if (expr == null)

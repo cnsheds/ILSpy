@@ -20,6 +20,7 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace ICSharpCode.Decompiler.ILAst {
 	public sealed class GotoRemoval
@@ -264,19 +265,19 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// </summary>
 		ILNode Enter(ILNode node, HashSet<ILNode> visitedNodes)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			if (node == null)
 				throw new ArgumentNullException();
 
 			if (!visitedNodes.Add(node))
 				return null;  // Infinite loop
 
-			ILLabel label = node as ILLabel;
-			if (label != null) {
+			if (node is ILLabel label) {
 				return Exit(label, visitedNodes);
 			}
 
-			ILExpression expr = node as ILExpression;
-			if (expr != null) {
+			if (node is ILExpression expr) {
 				if (expr.Code == ILCode.Br || expr.Code == ILCode.Leave) {
 					ILLabel target = (ILLabel)expr.Operand;
 					// Early exit - same try-block
@@ -322,8 +323,7 @@ namespace ICSharpCode.Decompiler.ILAst {
 				}
 			}
 
-			ILBlock block = node as ILBlock;
-			if (block != null) {
+			if (node is ILBlock block) {
 				if (block.EntryGoto != null) {
 					return Enter(block.EntryGoto, visitedNodes);
 				} else if (block.Body.Count > 0) {
@@ -333,13 +333,11 @@ namespace ICSharpCode.Decompiler.ILAst {
 				}
 			}
 
-			ILCondition cond = node as ILCondition;
-			if (cond != null) {
+			if (node is ILCondition cond) {
 				return cond.Condition;
 			}
 
-			ILWhileLoop loop = node as ILWhileLoop;
-			if (loop != null) {
+			if (node is ILWhileLoop loop) {
 				if (loop.Condition != null) {
 					return loop.Condition;
 				} else {
@@ -347,14 +345,16 @@ namespace ICSharpCode.Decompiler.ILAst {
 				}
 			}
 
-			ILTryCatchBlock tryCatch = node as ILTryCatchBlock;
-			if (tryCatch != null) {
+			if (node is ILTryCatchBlock tryCatch) {
 				return tryCatch;
 			}
 
-			ILSwitch ilSwitch = node as ILSwitch;
-			if (ilSwitch != null) {
+			if (node is ILSwitch ilSwitch) {
 				return ilSwitch.Condition;
+			}
+
+			if (node is ILFixedStatement fixedStatement) {
+				return fixedStatement;
 			}
 
 			throw new NotSupportedException(node.GetType().ToString());
@@ -365,6 +365,8 @@ namespace ICSharpCode.Decompiler.ILAst {
 		/// </summary>
 		ILNode Exit(ILNode node, HashSet<ILNode> visitedNodes)
 		{
+			RuntimeHelpers.EnsureSufficientExecutionStack();
+
 			if (node == null)
 				throw new ArgumentNullException();
 
@@ -397,6 +399,10 @@ namespace ICSharpCode.Decompiler.ILAst {
 
 			if (nodeParent is ILWhileLoop) {
 				return Enter(nodeParent, visitedNodes);
+			}
+
+			if (nodeParent is ILFixedStatement) {
+				return Exit(nodeParent, visitedNodes);
 			}
 
 			throw new NotSupportedException(nodeParent.GetType().ToString());
