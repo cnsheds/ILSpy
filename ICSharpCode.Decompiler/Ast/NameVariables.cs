@@ -435,20 +435,28 @@ namespace ICSharpCode.Decompiler.Ast {
 
 			GenericInstSig git = type as GenericInstSig;
 			if (git != null && git.GenericType != null && git.GenericArguments.Count == 1 && git.GenericType.IsSystemNullable()) {
-				type = ((GenericInstSig)type).GenericArguments[0];
+				type = ((GenericInstSig)type).GenericArguments[0].RemovePinnedAndModifiers();
 			}
 
 			string name;
 			if (type == null)
 				return string.Empty;
-			if (type.IsSingleOrMultiDimensionalArray) {
+			if (type.ToTypeDefOrRef().IsAnonymousType()) {
+				name = "anon";
+			}
+			else if (type.IsSingleOrMultiDimensionalArray) {
 				name = "array";
 			} else if (type.IsPointer || type.IsByRef) {
 				name = "ptr";
-			} else {
+			}
+			else {
 				stringBuilder.Clear();
-				if (FullNameFactory.NameSB(type, false, stringBuilder).EndsWith("Exception")) {
+				var nameSb = FullNameFactory.NameSB(type, false, stringBuilder);
+				if (nameSb.EndsWith("Exception")) {
 					name = "ex";
+				}
+				else if (nameSb.EndsWith("EventArgs")) {
+					name = "e";
 				}
 				else {
 					stringBuilder.Clear();
